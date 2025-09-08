@@ -1,0 +1,31 @@
+person_id,name,movie_id,title,release_year,rating,rated_at,movie_mean,rating_imp
+1,Haider,1,Oppenheimer,2023,5,2025-09-08,4.2,5
+1,Haider,2,Barbie,2023,3,2025-09-08,3.5,3
+1,Haider,3,Dune: Part Two,2024,5,2025-09-08,4.5,5
+1,Haider,4,Inside Out 2,2024,4,2025-09-08,4.25,4
+1,Haider,5,Spider-Man: Across the Spider-Verse,2023,5,2025-09-08,4.5,5
+1,Haider,6,Godzilla Minus One,2023,4,2025-09-08,4,4
+2,Sarim,1,Oppenheimer,2023,4,2025-09-08,4.2,4
+2,Sarim,2,Barbie,2023,5,2025-09-08,3.5,5
+2,Sarim,3,Dune: Part Two,2024,4,2025-09-08,4.5,4
+2,Sarim,4,Inside Out 2,2024,5,2025-09-08,4.25,5
+2,Sarim,5,Spider-Man: Across the Spider-Verse,2023,NA,NA,4.5,4.5
+2,Sarim,6,Godzilla Minus One,2023,3,2025-09-08,4,3
+3,Binte,1,Oppenheimer,2023,5,2025-09-08,4.2,5
+3,Binte,2,Barbie,2023,NA,NA,3.5,3.5
+3,Binte,3,Dune: Part Two,2024,4,2025-09-08,4.5,4
+3,Binte,4,Inside Out 2,2024,3,2025-09-08,4.25,3
+3,Binte,5,Spider-Man: Across the Spider-Verse,2023,4,2025-09-08,4.5,4
+3,Binte,6,Godzilla Minus One,2023,NA,NA,4,4
+4,Noori,1,Oppenheimer,2023,3,2025-09-08,4.2,3
+4,Noori,2,Barbie,2023,4,2025-09-08,3.5,4
+4,Noori,3,Dune: Part Two,2024,NA,NA,4.5,4.5
+4,Noori,4,Inside Out 2,2024,5,2025-09-08,4.25,5
+4,Noori,5,Spider-Man: Across the Spider-Verse,2023,4,2025-09-08,4.5,4
+4,Noori,6,Godzilla Minus One,2023,4,2025-09-08,4,4
+5,Zara,1,Oppenheimer,2023,4,2025-09-08,4.2,4
+5,Zara,2,Barbie,2023,2,2025-09-08,3.5,2
+5,Zara,3,Dune: Part Two,2024,5,2025-09-08,4.5,5
+5,Zara,4,Inside Out 2,2024,NA,NA,4.25,4.25
+5,Zara,5,Spider-Man: Across the Spider-Verse,2023,5,2025-09-08,4.5,5
+5,Zara,6,Godzilla Minus One,2023,5,2025-09-08,4,5

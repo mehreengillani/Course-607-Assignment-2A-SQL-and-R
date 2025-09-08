@@ -1,0 +1,239 @@
+---
+title: "Assignment – SQL and R (SQLite, separate movies_ratings.sql file)"
+author: "Mehreen Gillani"
+output: html_document
+---
+
+# 0) Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = FALSE)
+
+needed <- c("DBI","RSQLite","readr","dplyr","tidyr","ggplot2","knitr")
+to_install <- setdiff(needed, rownames(installed.packages()))
+if (length(to_install)) install.packages(to_install, quiet = TRUE)
+invisible(lapply(needed, library, character.only = TRUE))
+
+# Optional helper if running interactively from RStudio (not required for knitting)
+if (!requireNamespace("rstudioapi", quietly = TRUE)) {
+  install.packages("rstudioapi", quiet = TRUE)
+}
+```
+
+# 1) Locate files (with robust paths; works when knitting or from Console)
+
+```{r paths}
+get_base_dir <- function() {
+  # 1) When knitting: folder of this Rmd
+  rmd <- tryCatch(knitr::current_input(), error = function(e) NULL)
+  if (!is.null(rmd)) return(dirname(normalizePath(rmd)))
+
+  # 2) RStudio interactive: active document folder
+  if (requireNamespace("rstudioapi", quietly = TRUE) && rstudioapi::isAvailable()) {
+    doc <- tryCatch(rstudioapi::getActiveDocumentContext(), error = function(e) NULL)
+    if (!is.null(doc) && nzchar(doc$path)) return(dirname(normalizePath(doc$path)))
+  }
+
+  # 3) Fallback
+  getwd()
+}
+
+base_dir <- get_base_dir()
+setwd(base_dir)  # ensure relative paths resolve from this folder
+message("Base directory: ", base_dir)
+
+sql_path <- file.path(base_dir, "movies_ratings.sql")
+if (!file.exists(sql_path)) {
+  stop("Could not find movies_ratings.sql at: ", sql_path,
+       "\nMake sure this .Rmd and the .sql file are in the SAME folder.")
+} else {
+  message("Using SQL file: ", sql_path)
+}
+```
+
+# 2) Build SQLite DB from the SQL file (normalized schema + data)
+
+```{r build_db}
+db_path <- file.path(base_dir, "movies.db")
+if (file.exists(db_path)) file.remove(db_path)
+
+con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+DBI::dbExecute(con, "PRAGMA foreign_keys = ON;")
+
+# Read SQL and execute statements one-by-one (ignore lines starting with '--')
+sql_raw   <- readr::read_file(sql_path)
+sql_lines <- unlist(strsplit(sql_raw, "\n", fixed = TRUE))
+sql_lines <- sql_lines[!grepl("^\\s*--", sql_lines)]     # drop comment lines
+sql_clean <- paste(sql_lines, collapse = "\n")
+
+# Split on semicolons that terminate a statement
+stmts <- unlist(strsplit(sql_clean, ";[ \\t\\r\\n]*", perl = TRUE))
+for (s in stmts) {
+  s <- trimws(s)
+  if (nzchar(s)) DBI::dbExecute(con, s)
+}
+
+message("Database created at: ", db_path)
+```
+
+# 3) Quick checks (tables + previews)
+
+```{r checks}
+DBI::dbListTables(con)
+
+person_tbl <- DBI::dbGetQuery(con, "SELECT * FROM person ORDER BY person_id")
+movie_tbl  <- DBI::dbGetQuery(con, "SELECT * FROM movie ORDER BY movie_id")
+rating_tbl <- DBI::dbGetQuery(con, "SELECT * FROM rating ORDER BY person_id, movie_id")
+
+knitr::kable(person_tbl, caption = "People")
+knitr::kable(movie_tbl,  caption = "Movies")
+knitr::kable(rating_tbl, caption = "Ratings (observed rows only)")
+```
+
+# 4) Joined data (NA = “not seen” due to omitted rows in `rating`)
+
+```{r join}
+ratings_all <- DBI::dbGetQuery(con, "
+  SELECT p.person_id, p.name, m.movie_id, m.title, m.release_year, r.rating, r.rated_at
+  FROM person p
+  CROSS JOIN movie m
+  LEFT JOIN rating r
+    ON r.person_id = p.person_id AND r.movie_id = m.movie_id
+  ORDER BY p.person_id, m.movie_id;
+")
+
+knitr::kable(head(ratings_all, 12), caption = "Joined grid (sample; NA means not seen)")
+```
+
+# 5) Coverage summaries (clear missing-data demonstration)
+
+```{r coverage}
+coverage_by_person <- ratings_all %>%
+  dplyr::group_by(name) %>%
+  dplyr::summarize(
+    n_seen  = sum(!is.na(rating)),
+    n_total = dplyr::n(),
+    pct_seen = round(100 * n_seen / n_total, 1)
+  ) %>%
+  dplyr::arrange(dplyr::desc(pct_seen))
+
+coverage_by_movie <- ratings_all %>%
+  dplyr::group_by(title) %>%
+  dplyr::summarize(n_raters = sum(!is.na(rating))) %>%
+  dplyr::arrange(dplyr::desc(n_raters), title)
+
+knitr::kable(coverage_by_person, caption = "Coverage by person")
+knitr::kable(coverage_by_movie,  caption = "Number of raters per movie")
+```
+
+# 6) (Optional) Per-movie averages with 95% CI + plot
+
+```{r averages}
+movie_summary <- ratings_all %>%
+  dplyr::group_by(title) %>%
+  dplyr::summarize(
+    n    = sum(!is.na(rating)),
+    mean = mean(rating, na.rm = TRUE),
+    sd   = sd(rating,   na.rm = TRUE),
+    se   = sd / sqrt(n),
+    ci95_lo = mean - 1.96 * se,
+    ci95_hi = mean + 1.96 * se
+  ) %>%
+  dplyr::arrange(dplyr::desc(mean), dplyr::desc(n), title)
+
+knitr::kable(movie_summary, digits = 2,
+             caption = "Per-movie mean ratings with 95% CI")
+
+ggplot(movie_summary, aes(x = reorder(title, mean), y = mean)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = ci95_lo, ymax = ci95_hi), width = 0.2) +
+  coord_flip() +
+  labs(x = "Movie", y = "Average rating (1–5)",
+       title = "Average ratings (with 95% CI)") +
+  theme_minimal(base_size = 12)
+```
+
+# 7) Missing-data handling (explicit imputation)
+
+```{r imputation}
+# Movie-mean imputation (with global fallback) for analyses that need a complete matrix
+movie_means <- dplyr::summarize(dplyr::group_by(ratings_all, title),
+                                movie_mean = mean(rating, na.rm = TRUE))
+global_mean <- mean(ratings_all$rating, na.rm = TRUE)
+
+ratings_imputed <- ratings_all %>%
+  dplyr::left_join(movie_means, by = "title") %>%
+  dplyr::mutate(
+    rating_imp = ifelse(is.na(rating),
+                        ifelse(is.na(movie_mean), global_mean, movie_mean),
+                        rating)
+  )
+
+knitr::kable(
+  head(ratings_imputed %>% dplyr::select(name, title, rating, rating_imp), 12),
+  caption = "Original vs imputed rating (movie-mean with global fallback)"
+)
+```
+
+# 8) Standardization (z-scores per rater) + brief Q&A answer
+
+```{r standardization}
+# Standardize within-rater to reduce rater leniency/strictness effects
+ratings_z <- ratings_imputed %>%
+  dplyr::group_by(name) %>%
+  dplyr::mutate(
+    mu = mean(rating_imp, na.rm = TRUE),
+    sd = sd(rating_imp, na.rm = TRUE),
+    sd = ifelse(is.na(sd) | sd == 0, 1, sd),  # guard against zero variance
+    rating_z = (rating_imp - mu) / sd
+  ) %>%
+  dplyr::ungroup()
+
+movie_summary_z <- ratings_z %>%
+  dplyr::group_by(title) %>%
+  dplyr::summarize(
+    n = dplyr::n(),
+    mean_z = mean(rating_z, na.rm = TRUE),
+    sd_z   = sd(rating_z,   na.rm = TRUE)
+  ) %>%
+  dplyr::arrange(dplyr::desc(mean_z))
+
+knitr::kable(head(ratings_z %>% dplyr::select(name, title, rating, rating_imp, rating_z), 12),
+             digits = 2,
+             caption = "Original rating, imputed rating, and standardized (z) rating")
+
+knitr::kable(movie_summary_z, digits = 2,
+             caption = "Per-movie standardized score (z) after rater standardization")
+```
+
+**Q:** *Is there any benefit in standardizing ratings? How might you approach this?*  
+**A:** Yes. Standardization reduces rater bias i.e. some raters are consistently strict or lenient. By z-scoring within rater (subtract each rater’s mean and divide by their SD), each person’s ratings are put on a common scale so we compare relative preferences rather than absolute levels. 
+Approach: compute per-rater mean/SD on a complete matrix, using simple movie-mean imputation above, transform to z-scores, and then aggregate by movie (see `mean_z`). This yields fairer cross-rater comparisons.
+
+# 9) Export artifacts (dataset + summaries)
+
+```{r exports}
+# Raw SQL tables
+readr::write_csv(person_tbl, file.path(base_dir, "person.csv"))
+readr::write_csv(movie_tbl,  file.path(base_dir, "movie.csv"))
+readr::write_csv(rating_tbl, file.path(base_dir, "rating.csv"))
+
+# Full analysis grid (includes NA for not-seen)
+readr::write_csv(ratings_all,     file.path(base_dir, "ratings_full_grid.csv"))
+# Only observed ratings (no NA)
+ratings_only <- subset(ratings_all, !is.na(rating))
+readr::write_csv(ratings_only,    file.path(base_dir, "ratings_only.csv"))
+
+# Imputed and standardized summaries
+readr::write_csv(ratings_imputed, file.path(base_dir, "ratings_imputed.csv"))
+readr::write_csv(movie_summary,   file.path(base_dir, "movie_summary.csv"))
+readr::write_csv(movie_summary_z, file.path(base_dir, "movie_summary_z.csv"))
+
+message("Wrote CSVs: person.csv, movie.csv, rating.csv, ratings_full_grid.csv, ratings_only.csv, ratings_imputed.csv, movie_summary.csv, movie_summary_z.csv")
+```
+
+# 10) Cleanup
+
+```{r cleanup, include=FALSE}
+DBI::dbDisconnect(con)
+```
